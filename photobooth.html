@@ -198,6 +198,11 @@
         .capture-btn:active:not(:disabled) { transform:translateY(0); }
         .capture-btn:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 
+        .qty-row { display:flex; gap:6px; margin-bottom:10px; }
+        .qty-btn { flex:1; padding:7px; background:var(--bg-glass); border:1px solid var(--border); border-radius:10px; color:var(--text-3); font-family:'Outfit',sans-serif; font-weight:600; font-size:.75rem; cursor:pointer; transition:all .2s; }
+        .qty-btn.active { background:var(--rose); color:#fff; border-color:var(--rose); }
+        .qty-btn:disabled { opacity:.4; cursor:not-allowed; }
+
         .action-row { display:flex; gap:8px; margin-top:10px; }
         .btn-ghost {
             flex:1; padding:9px 8px;
@@ -242,10 +247,6 @@
         </div>
         <div class="top-right" id="dot-row">
             <span style="font-size:.7rem;color:var(--text-3)">&#128247;</span>
-            <div class="shot-dot" data-i="0"></div>
-            <div class="shot-dot" data-i="1"></div>
-            <div class="shot-dot" data-i="2"></div>
-            <div class="shot-dot" data-i="3"></div>
         </div>
     </div>
 
@@ -274,6 +275,11 @@
             </div>
             <div class="glass-card">
                 <div class="card-label">Kontrol</div>
+                <div class="qty-row" id="qty-row">
+                    <button class="qty-btn" data-qty="2">2 Foto</button>
+                    <button class="qty-btn active" data-qty="4">4 Foto</button>
+                    <button class="qty-btn" data-qty="6">6 Foto</button>
+                </div>
                 <button class="capture-btn" id="capBtn" disabled>
                     &#128247; Mulai Strip 4 Foto
                 </button>
@@ -300,13 +306,14 @@ const dlBtn    = document.getElementById('dlBtn');
 const fg   = document.getElementById('frame-grid');
 const sr   = document.getElementById('strip-row');
 const ncEl = document.getElementById('nc');
-const dots = document.querySelectorAll('.shot-dot[data-i]');
+const dotRow = document.getElementById('dot-row');
+let dots = [];
 
 const vid = document.createElement('video');
 vid.autoplay = vid.playsInline = vid.muted = true;
 
 let selFrame = 0, photos = [], shooting = false, ready = false;
-const MAX = 4;
+let MAX = 4;
 
 // ── Frames ──────────────────────────────────────────────
 const FRAMES = [
@@ -505,6 +512,16 @@ function fillSlot(i,url){
 }
 
 // ── Dots & UI ────────────────────────────────────────────
+function renderDots() {
+  dotRow.innerHTML = '<span style="font-size:.7rem;color:var(--text-3)">&#128247;</span>';
+  dots = [];
+  for(let i=0; i<MAX; i++){
+    const d = document.createElement('div');
+    d.className = 'shot-dot'; d.dataset.i = i;
+    dotRow.appendChild(d);
+    dots.push(d);
+  }
+}
 function updateDots(act=-1){
   dots.forEach((d,i)=>{
     d.classList.remove('taken','active');
@@ -517,9 +534,10 @@ function updateUI(){
   capBtn.disabled=full||shooting||!ready;
   resetBtn.disabled=!some||shooting;
   dlBtn.disabled=!some||shooting;
+  document.querySelectorAll('.qty-btn').forEach(b => b.disabled = some || shooting);
   done.classList.toggle('visible',full&&!shooting);
-  capBtn.innerHTML=photos.length===0?'&#128247; Mulai Strip 4 Foto':
-    photos.length<MAX?'&#128247; Lanjutkan ('+(MAX-photos.length)+' tersisa)':
+  capBtn.innerHTML=photos.length===0?`&#128247; Mulai Strip ${MAX} Foto`:
+    photos.length<MAX?`&#128247; Lanjutkan (${MAX-photos.length} tersisa)`:
     '&#10003; Strip Selesai!';
   updateDots();
 }
@@ -622,7 +640,17 @@ capBtn.addEventListener('click',shoot);
 resetBtn.addEventListener('click',reset);
 dlBtn.addEventListener('click',download);
 
-renderThumbs(); renderStrip(); startCam();
+document.querySelectorAll('.qty-btn').forEach(b => {
+  b.addEventListener('click', (e) => {
+    if (photos.length > 0 || shooting) return;
+    document.querySelector('.qty-btn.active')?.classList.remove('active');
+    b.classList.add('active');
+    MAX = parseInt(b.dataset.qty);
+    renderDots(); renderStrip(); updateUI();
+  });
+});
+
+renderThumbs(); renderDots(); renderStrip(); startCam();
 </script>
 </body>
 </html>
