@@ -277,7 +277,9 @@
             transform: scaleX(-1);
             display: block;
             background: #111;
+            transition: transform 0.3s ease;
         }
+        #webcam.no-mirror { transform: scaleX(1); }
 
         #hand-canvas {
             position: absolute;
@@ -287,8 +289,9 @@
             transform: scaleX(-1);
             pointer-events: none;
             opacity: 0;
-            transition: opacity 0.4s;
+            transition: opacity 0.4s, transform 0.3s ease;
         }
+        #hand-canvas.no-mirror { transform: scaleX(1); }
         #hand-canvas.visible { opacity: 1; }
 
         /* Blur overlay canvas — sits between video and hand canvas */
@@ -349,7 +352,9 @@
             overflow: hidden;
             z-index: 10;
             transform: scaleX(-1);
+            transition: transform 0.3s ease;
         }
+        #emote-container.no-mirror { transform: scaleX(1); }
 
         /* Floating cam badges */
         .cam-overlay-top {
@@ -1271,10 +1276,18 @@
                         applyBlur();
                         blurCanvas.classList.add("visible");
                         blurBadge.classList.add("visible");
+                        // Disable mirror when blur is active
+                        video.classList.add("no-mirror");
+                        handCanvas.classList.add("no-mirror");
+                        emoteContainer.classList.add("no-mirror");
                     } else {
                         clearBlur();
                         blurCanvas.classList.remove("visible");
                         blurBadge.classList.remove("visible");
+                        // Restore mirror when blur is off
+                        video.classList.remove("no-mirror");
+                        handCanvas.classList.remove("no-mirror");
+                        emoteContainer.classList.remove("no-mirror");
                     }
 
                     if (any) {
@@ -1307,6 +1320,9 @@
                     clearBlur();
                     blurCanvas.classList.remove("visible");
                     blurBadge.classList.remove("visible");
+                    video.classList.remove("no-mirror");
+                    handCanvas.classList.remove("no-mirror");
+                    emoteContainer.classList.remove("no-mirror");
 
                     for (let i = 0; i < 2; i++) {
                         if (handStates[i]) {
