@@ -291,6 +291,57 @@
         }
         #hand-canvas.visible { opacity: 1; }
 
+        /* Blur overlay canvas — sits between video and hand canvas */
+        #blur-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            z-index: 1;
+        }
+        #blur-canvas.visible { opacity: 1; }
+
+        /* Peace blur badge */
+        .blur-badge {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10,10,15,0.55);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(99,179,237,0.3);
+            border-radius: 14px;
+            padding: 10px 20px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #63b3ed;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: 20;
+            text-shadow: 0 0 12px rgba(99,179,237,0.5);
+            box-shadow: 0 0 24px -8px rgba(99,179,237,0.3);
+            white-space: nowrap;
+        }
+        #blur-badge.visible { opacity: 1; }
+
+        .guide-item.peace-detected {
+            border-color: rgba(99,179,237,0.4);
+            background: rgba(99,179,237,0.08);
+            box-shadow: inset 0 0 20px -10px rgba(99,179,237,0.3);
+        }
+        .guide-item.peace-detected .guide-icon {
+            background: rgba(99,179,237,0.15);
+        }
+        .guide-item.peace-detected .guide-text p { color: #63b3ed; }
+
         #emote-container {
             position: absolute;
             inset: 0;
@@ -374,6 +425,11 @@
             border-color: rgba(52,211,153,0.3);
             color: var(--success);
         }
+        .status-chip.peace {
+            border-color: rgba(99,179,237,0.4);
+            color: #63b3ed;
+            box-shadow: 0 0 20px -5px rgba(99,179,237,0.3);
+        }
         .status-dot {
             width: 6px; height: 6px;
             border-radius: 50%;
@@ -388,6 +444,11 @@
             background: var(--rose);
             box-shadow: 0 0 6px var(--rose);
             animation: blink 0.6s infinite;
+        }
+        .status-chip.peace .status-dot {
+            background: #63b3ed;
+            box-shadow: 0 0 6px #63b3ed;
+            animation: blink 1s infinite;
         }
 
         .love-score {
@@ -684,7 +745,9 @@
         <div class="cam-area">
             <div class="cam-frame" id="cam-frame">
                 <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="blur-canvas"></canvas>
                 <canvas id="hand-canvas"></canvas>
+                <div id="blur-badge">✌️ Blur Aktif</div>
                 <div id="emote-container"></div>
 
                 <div class="cam-overlay-top">
@@ -723,8 +786,15 @@
                         <p>Jempol & telunjuk bertemu</p>
                     </div>
                 </div>
-                <div class="guide-item">
+                <div class="guide-item" id="guide-peace">
                     <div class="guide-icon">✌️</div>
+                    <div class="guide-text">
+                        <h4>Peace ✌️ — Blur</h4>
+                        <p>Blur background aktif</p>
+                    </div>
+                </div>
+                <div class="guide-item">
+                    <div class="guide-icon">🫰</div>
                     <div class="guide-text">
                         <h4>Dua Tangan</h4>
                         <p>Double love emotes!</p>
@@ -771,10 +841,13 @@
         const video          = document.getElementById("webcam");
         const handCanvas     = document.getElementById("hand-canvas");
         const handCtx        = handCanvas.getContext("2d");
+        const blurCanvas     = document.getElementById("blur-canvas");
+        const blurCtx        = blurCanvas.getContext("2d");
         const landmarkCanvas = document.getElementById("landmark-canvas");
         const landmarkCtx    = landmarkCanvas.getContext("2d");
         const emoteContainer = document.getElementById("emote-container");
         const camFrame       = document.getElementById("cam-frame");
+        const blurBadge      = document.getElementById("blur-badge");
 
         const splash         = document.getElementById("splash");
         const splashBar      = document.getElementById("splash-bar");
@@ -785,6 +858,7 @@
         const statusText     = document.getElementById("status-text");
         const fpsBadge       = document.getElementById("fps-badge");
         const guideSaranghaeyo = document.getElementById("guide-saranghaeyo");
+        const guidePeace     = document.getElementById("guide-peace");
         const guideCard      = document.getElementById("guide-card");
         const noHandMsg      = document.getElementById("no-hand-msg");
         const logList        = document.getElementById("log-list");
@@ -813,8 +887,14 @@
         let lastFpsTime     = performance.now();
         let totalLove       = 0;
         let handStates      = [false, false];
+        let peaceStates     = [false, false];
         let lastEmoteTime   = [0, 0];
         const EMOTE_CD      = 100;
+        let blurActive      = false;
+        // Off-screen canvas for blur rendering
+        const offCanvas     = document.createElement("canvas");
+        const offCtx        = offCanvas.getContext("2d");
+        const BLUR_AMOUNT   = 18; // px blur strength
 
         const LOVE_EMOJIS = ['❤️','💕','💖','💗','💘','💝','💓','💞','🩷','♥️','🫶','💜','🧡','💛'];
 
@@ -844,6 +924,59 @@
 
         function heartPos(lm) {
             return { x: (lm[4].x + lm[8].x) / 2, y: (lm[4].y + lm[8].y) / 2 };
+        }
+
+        // ── Peace Sign Detection ✌️ ──────────────────────────
+        // Index & middle extended upward; ring & pinky curled; thumb tucked or free
+        function detectPeace(lm) {
+            // Index finger (8) extended: tip above PIP joint
+            const indexExtended = lm[8].y < lm[6].y;
+            // Middle finger (12) extended: tip above PIP joint
+            const middleExtended = lm[12].y < lm[10].y;
+            // Ring finger (16) curled: tip below PIP joint
+            const ringCurled = lm[16].y > lm[14].y;
+            // Pinky (20) curled: tip below PIP joint
+            const pinkyCurled = lm[20].y > lm[18].y;
+            // Index & middle spread apart enough to form V
+            const dx = lm[8].x - lm[12].x;
+            const dy = lm[8].y - lm[12].y;
+            const fingerSpread = Math.sqrt(dx * dx + dy * dy) > 0.04;
+            // Make sure it's NOT a saranghaeyo (thumb & index touching)
+            const thumbIndexDist = Math.sqrt(
+                (lm[4].x - lm[8].x) ** 2 + (lm[4].y - lm[8].y) ** 2
+            );
+            const notSaranghaeyo = thumbIndexDist >= 0.07;
+
+            return indexExtended && middleExtended && ringCurled && pinkyCurled && fingerSpread && notSaranghaeyo;
+        }
+
+        // ── Blur Rendering ──────────────────────────────────
+        function applyBlur() {
+            const vw = video.videoWidth;
+            const vh = video.videoHeight;
+            if (!vw || !vh) return;
+
+            // Sync off-screen canvas size
+            if (offCanvas.width !== vw || offCanvas.height !== vh) {
+                offCanvas.width = vw;
+                offCanvas.height = vh;
+            }
+
+            // Draw current video frame onto off-screen canvas with blur filter
+            offCtx.filter = `blur(${BLUR_AMOUNT}px)`;
+            offCtx.drawImage(video, 0, 0, vw, vh);
+            offCtx.filter = "none";
+
+            // Sync blur canvas dimensions to match display element
+            blurCanvas.width  = vw;
+            blurCanvas.height = vh;
+
+            // Draw blurred frame onto the visible blur canvas (mirrored by CSS)
+            blurCtx.drawImage(offCanvas, 0, 0, vw, vh);
+        }
+
+        function clearBlur() {
+            blurCtx.clearRect(0, 0, blurCanvas.width, blurCanvas.height);
         }
 
         // ── Emote Spawning ──────────────────────────────────
@@ -1079,11 +1212,14 @@
                 if (n > 0) {
                     noHandMsg.style.opacity = "0";
                     const states = [];
+                    const newPeaceStates = [];
 
                     for (let i = 0; i < n; i++) {
                         const lm = res.landmarks[i];
                         const detected = detectSaranghaeyo(lm);
+                        const peace    = detectPeace(lm);
                         states.push(detected);
+                        newPeaceStates.push(peace);
 
                         if (detected && !handStates[i]) {
                             handStates[i] = true;
@@ -1103,21 +1239,50 @@
                             spawnEmote(p.x, p.y);
                             lastEmoteTime[i] = now;
                         }
+
+                        // Peace state transitions
+                        if (peace && !peaceStates[i]) {
+                            peaceStates[i] = true;
+                            const label = n > 1 ? `Tangan ${i+1}` : "Tangan";
+                            addLog(`✌️ ${label}: Blur aktif!`, "info");
+                        } else if (!peace && peaceStates[i]) {
+                            peaceStates[i] = false;
+                            const label = n > 1 ? `Tangan ${i+1}` : "Tangan";
+                            addLog(`✌️ ${label}: Blur dimatikan`, "info");
+                        }
                     }
 
                     for (let i = n; i < 2; i++) {
                         if (handStates[i]) handStates[i] = false;
+                        if (peaceStates[i]) peaceStates[i] = false;
                     }
 
                     const any = states.some(Boolean);
                     const cnt = states.filter(Boolean).length;
+                    const anyPeace = newPeaceStates.some(Boolean);
+
                     camFrame.classList.toggle("active", any);
                     guideSaranghaeyo.classList.toggle("detected", any);
+                    guidePeace.classList.toggle("peace-detected", anyPeace);
                     guideCard.classList.toggle("glow-active", any);
+
+                    // Blur overlay
+                    if (anyPeace) {
+                        applyBlur();
+                        blurCanvas.classList.add("visible");
+                        blurBadge.classList.add("visible");
+                    } else {
+                        clearBlur();
+                        blurCanvas.classList.remove("visible");
+                        blurBadge.classList.remove("visible");
+                    }
 
                     if (any) {
                         statusChip.className = "status-chip love";
                         statusText.textContent = cnt > 1 ? "💕 Double Saranghaeyo!" : "❤️ Saranghaeyo!";
+                    } else if (anyPeace) {
+                        statusChip.className = "status-chip peace";
+                        statusText.textContent = "✌️ Peace — Blur Aktif";
                     } else {
                         statusChip.className = "status-chip ready";
                         statusText.textContent = "✅ AI Aktif";
@@ -1137,12 +1302,19 @@
                     handCanvas.classList.remove("visible");
                     camFrame.classList.remove("active");
                     guideSaranghaeyo.classList.remove("detected");
+                    guidePeace.classList.remove("peace-detected");
                     guideCard.classList.remove("glow-active");
+                    clearBlur();
+                    blurCanvas.classList.remove("visible");
+                    blurBadge.classList.remove("visible");
 
                     for (let i = 0; i < 2; i++) {
                         if (handStates[i]) {
                             handStates[i] = false;
                             addLog("🖐️ Tangan keluar frame", "clear");
+                        }
+                        if (peaceStates[i]) {
+                            peaceStates[i] = false;
                         }
                     }
                     statusChip.className = "status-chip ready";
